@@ -1402,6 +1402,20 @@ const STORAGE_KEY = 'daftar_nusus_v1';
 let state;
 
 function migrate(parsed) {
+  try {
+    return migrateInner(parsed);
+  } catch (e) {
+    // شبكة أمان حاسمة: خطأ في خطوة ترقية البيانات (migration) لا يجب أن يعني
+    // فقدان محتوى المستخدم بالكامل. نعيد البيانات كما وردت (دون ترقية) بدل
+    // استبدالها بحالة افتراضية فارغة، لأن استبدالها هو ما كان يتسبب سابقًا
+    // في محو النسخة الحقيقية عند أول حفظ تلقائي لاحق.
+    console.warn('migrate() failed — returning raw data unmigrated to avoid data loss', e);
+    try { toast('⚠️ حدث خطأ أثناء تحديث تنسيق البيانات، لكن تم الحفاظ عليها. يرجى التواصل مع المطوّر.', '⚠️'); } catch (e2) {}
+    try { if (parsed && typeof parsed === 'object') repairState(parsed); } catch (e3) {}
+    return parsed;
+  }
+}
+function migrateInner(parsed) {
   if (!parsed || typeof parsed !== 'object') return parsed;
   if (!parsed.meta) parsed.meta = {};
   if (!parsed.meta.logo) parsed.meta.logo = DEFAULT_LOGO;
@@ -1558,6 +1572,8 @@ function load() {
 }
 let saveTimer = null;
 let saveFailedWarned = false;
+let shrinkGuardWarned = false;
+let bypassSaveGuardOnce = false;
 let idbHistoryTimer = null;
 function scheduleHistorySnapshot() {
   clearTimeout(idbHistoryTimer);
@@ -1594,6 +1610,27 @@ function save(now = false) {
       state.meta = state.meta || {};
       state.meta.lastSavedAt = Date.now();
       const json = JSON.stringify(state);
+
+      // شبكة أمان حاسمة ضد محو البيانات: إن كانت الحالة الحالية في الذاكرة
+      // أصغر بشكل غير طبيعي من آخر نسخة محفوظة فعليًا على القرص (كأن تصبح
+      // فجأة شبه فارغة بسبب خطأ عابر)، نرفض الكتابة فوق النسخة الجيدة
+      // ونحذّر المستخدم بدل تدميرها صامتًا عبر الحفظ التلقائي الدوري.
+      const bypass = bypassSaveGuardOnce;
+      bypassSaveGuardOnce = false;
+      if (!bypass) {
+        try {
+          const existing = localStorage.getItem(STORAGE_KEY);
+          if (existing && existing.length > 800 && json.length < existing.length * 0.25) {
+            console.warn('save blocked: suspicious data shrink', existing.length, '->', json.length);
+            if (!shrinkGuardWarned) {
+              shrinkGuardWarned = true;
+              toast('⚠️ تم إيقاف الحفظ التلقائي وقائيًا: البيانات الحالية أصغر بشكل غير طبيعي من آخر نسخة محفوظة. أعد تحميل الصفحة، أو افتح «🗄️ النسخ الاحتياطية» لاسترجاع بياناتك.', '⚠️');
+            }
+            return;
+          }
+        } catch (guardErr) {}
+      }
+
       localStorage.setItem(STORAGE_KEY, json);
       // تحقق فوري: نقرأ ما كتبناه للتأكد أن الحفظ نجح فعلاً وليس صامتًا
       ok = localStorage.getItem(STORAGE_KEY) === json;
@@ -2505,6 +2542,7 @@ document.addEventListener('click', e => {
       if (confirm('هل أنت متأكد من حذف جميع البيانات والبدء من جديد؟')) {
         localStorage.removeItem(STORAGE_KEY);
         state = structuredClone(DEFAULT_STATE);
+        bypassSaveGuardOnce = true;
         save(true); render();
         toast('تمت إعادة التعيين', '♻️');
       }
@@ -3026,6 +3064,7 @@ $('#importFile').addEventListener('change', e => {
         ui: { ...base.ui, view:{ type:'home' } }
       };
       repairState(state);
+      bypassSaveGuardOnce = true;
       save(true); render();
       toast('تم استيراد البيانات بنجاح', '✅');
     } catch (err) { toast('ملف غير صالح', '⚠️'); }
@@ -3306,6 +3345,7 @@ async function restoreBackup(id) {
   if (!item || !item.data) { toast('تعذر إيجاد هذه النسخة', '⚠️'); return; }
   try {
     state = migrate(structuredClone(item.data));
+    bypassSaveGuardOnce = true;
     save(true); render();
     closeBackupsModal();
     toast('تم استرجاع النسخة الاحتياطية بنجاح', '♻️');
