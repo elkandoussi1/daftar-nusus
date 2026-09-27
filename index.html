@@ -790,6 +790,7 @@ body.a4-mode .toast{bottom:auto;top:100px}
 
     <h4 style="margin:22px 0 8px;font-size:13px;color:var(--c-muted);font-weight:800">قاعدة البيانات المحلية</h4>
     <button class="mini" style="width:100%;justify-content:center;padding:10px" data-action="open-backups">🗄️ عرض النسخ الاحتياطية المحفوظة</button>
+    <button class="mini" style="width:100%;justify-content:center;margin-top:8px;padding:10px" data-action="open-diagnostics">🩺 تشخيص التخزين</button>
 
     <h4 style="margin:22px 0 8px;font-size:13px;color:var(--c-muted);font-weight:800">إصلاح وصيانة</h4>
     <button class="mini" style="width:100%;justify-content:center;padding:10px;background:#fef3c7;color:#7c2d12;border-color:#b45309" data-action="repair-data">🔧 إصلاح وسوم HTML التالفة</button>
@@ -891,6 +892,19 @@ body.a4-mode .toast{bottom:auto;top:100px}
     <div id="backupsList" style="max-height:320px;overflow-y:auto"></div>
     <div class="modal-actions">
       <button class="btn-cancel" data-action="close-backups" style="flex:1">إغلاق</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal" id="diagnosticsModal">
+  <div class="modal-box" style="max-width:460px">
+    <button class="share-gate-close" data-action="close-diagnostics" title="إغلاق">✕</button>
+    <h3>🩺 تشخيص التخزين</h3>
+    <div class="modal-sub">هذه المعلومات تساعد على معرفة سبب فقدان البيانات بدقة. اضغط «نسخ التقرير» وأرسله لمن يساعدك في حل المشكلة.</div>
+    <div id="diagnosticsList" style="max-height:360px;overflow-y:auto;font-size:12.5px;line-height:2;direction:ltr;text-align:left;background:var(--c-bg-2);border:1px solid var(--c-border);border-radius:10px;padding:10px;white-space:pre-wrap;word-break:break-all"></div>
+    <div class="modal-actions">
+      <button class="btn-save" data-action="copy-diagnostics">📋 نسخ التقرير</button>
+      <button class="btn-cancel" data-action="close-diagnostics" style="flex:1">إغلاق</button>
     </div>
   </div>
 </div>
@@ -1577,6 +1591,8 @@ function save(now = false) {
   const doIt = () => {
     let ok = false;
     try {
+      state.meta = state.meta || {};
+      state.meta.lastSavedAt = Date.now();
       const json = JSON.stringify(state);
       localStorage.setItem(STORAGE_KEY, json);
       // تحقق فوري: نقرأ ما كتبناه للتأكد أن الحفظ نجح فعلاً وليس صامتًا
@@ -2510,6 +2526,13 @@ document.addEventListener('click', e => {
       break;
     case 'close-backups': closeBackupsModal(); break;
     case 'restore-backup': restoreBackup(+btn.dataset.id); break;
+    case 'open-diagnostics':
+      $('#themeDrawer').classList.remove('open');
+      $('#themeOverlay').classList.remove('show');
+      openDiagnosticsModal();
+      break;
+    case 'close-diagnostics': closeDiagnosticsModal(); break;
+    case 'copy-diagnostics': copyDiagnosticsReport(); break;
     case 'save-event': {
       if (!pendingDay) return;
       const sec = state.sections[pendingDay.secIdx];
@@ -3289,8 +3312,109 @@ async function restoreBackup(id) {
   } catch (e) { toast('تعذر استرجاع هذه النسخة', '⚠️'); }
 }
 
+/* ============================================================
+   تشخيص التخزين — لمعرفة السبب الدقيق لفقدان البيانات بدل التخمين:
+   يفحص وضع التشغيل (مثبَّت/متصفح)، صلاحية «تخزين دائم»، مساحة
+   التخزين المتاحة، وآخر وقت حفظ فعلي في localStorage وIndexedDB.
+   ============================================================ */
+let lastDiagnosticsReport = '';
+async function buildDiagnosticsReport() {
+  const lines = [];
+  const now = Date.now();
+  const fmtAgo = (ts) => {
+    if (!ts) return 'لا يوجد';
+    const s = Math.round((now - ts) / 1000);
+    const human = s < 60 ? `قبل ${s} ثانية` : s < 3600 ? `قبل ${Math.round(s/60)} دقيقة` : s < 86400 ? `قبل ${Math.round(s/3600)} ساعة` : `قبل ${Math.round(s/86400)} يوم`;
+    return `${fmtBackupDate(ts)} (${human})`;
+  };
+
+  // وضع العرض: هل يعمل كتطبيق مثبَّت فعلًا أم كتبويب متصفح عادي
+  const standalone = window.matchMedia('(display-mode: standalone)').matches
+    || window.navigator.standalone === true;
+  lines.push(`وضع التشغيل: ${standalone ? '✅ مثبَّت (standalone)' : '⚠️ تبويب متصفح عادي (غير مثبَّت)'}`);
+
+  // صلاحية التخزين الدائم — إن كانت false فالمتصفح قد يمسح البيانات عند ضغط التخزين
+  let persisted = null;
+  try {
+    if (navigator.storage && navigator.storage.persisted) {
+      persisted = await navigator.storage.persisted();
+    }
+  } catch (e) {}
+  lines.push(`تخزين دائم ممنوح (persisted): ${persisted === null ? 'غير مدعوم في هذا المتصفح' : (persisted ? '✅ نعم' : '❌ لا — هذا سبب محتمل رئيسي لفقدان البيانات')}`);
+
+  // مساحة التخزين المتاحة على الجهاز لهذا الموقع
+  try {
+    if (navigator.storage && navigator.storage.estimate) {
+      const est = await navigator.storage.estimate();
+      const usedMB = (est.usage/1048576).toFixed(2);
+      const quotaMB = (est.quota/1048576).toFixed(1);
+      lines.push(`المساحة المستخدَمة/المتاحة: ${usedMB}MB / ${quotaMB}MB`);
+    }
+  } catch (e) {}
+
+  // localStorage
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      lines.push(`localStorage: ✅ موجود (${(raw.length/1024).toFixed(1)}KB) — آخر حفظ: ${fmtAgo(parsed?.meta?.lastSavedAt)}`);
+    } else {
+      lines.push(`localStorage: ❌ فارغ الآن`);
+    }
+  } catch (e) { lines.push(`localStorage: تعذّرت القراءة (${e.message})`); }
+
+  // IndexedDB
+  try {
+    const idbState = await idbLoadState();
+    if (idbState) {
+      lines.push(`IndexedDB: ✅ موجود — آخر حفظ: ${fmtAgo(idbState?.meta?.lastSavedAt)}`);
+    } else {
+      lines.push(`IndexedDB: ❌ فارغ الآن`);
+    }
+  } catch (e) { lines.push(`IndexedDB: تعذّرت القراءة (${e.message})`); }
+
+  lines.push(`الوقت الحالي على الجهاز: ${fmtBackupDate(now)}`);
+  lines.push(`المتصفح (User-Agent): ${navigator.userAgent}`);
+
+  return lines.join('\n');
+}
+async function openDiagnosticsModal() {
+  const box = $('#diagnosticsList');
+  box.textContent = 'جاري الفحص...';
+  $('#diagnosticsModal').classList.add('show');
+  // نطلب تخزينًا دائمًا بشكل استباقي في كل مرة يُفتح فيها هذا التشخيص
+  try { if (navigator.storage && navigator.storage.persist) await navigator.storage.persist(); } catch (e) {}
+  lastDiagnosticsReport = await buildDiagnosticsReport();
+  box.textContent = lastDiagnosticsReport;
+}
+function closeDiagnosticsModal() { $('#diagnosticsModal').classList.remove('show'); }
+function copyDiagnosticsReport() {
+  if (!lastDiagnosticsReport) return;
+  const done = () => toast('تم نسخ التقرير — أرسله الآن', '📋');
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(lastDiagnosticsReport).then(done).catch(() => {
+      try {
+        const ta = document.createElement('textarea');
+        ta.value = lastDiagnosticsReport; document.body.appendChild(ta); ta.select();
+        document.execCommand('copy'); ta.remove(); done();
+      } catch (e) { toast('تعذر النسخ', '⚠️'); }
+    });
+  } else {
+    try {
+      const ta = document.createElement('textarea');
+      ta.value = lastDiagnosticsReport; document.body.appendChild(ta); ta.select();
+      document.execCommand('copy'); ta.remove(); done();
+    } catch (e) { toast('تعذر النسخ', '⚠️'); }
+  }
+}
+$('#diagnosticsModal').addEventListener('click', e => {
+  if (e.target.id === 'diagnosticsModal') closeDiagnosticsModal();
+});
+
 (function init() {
   state = load();
+  // نطلب تخزينًا دائمًا لا يُمسح تحت ضغط مساحة الجهاز (best effort، صامت)
+  try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist(); } catch (e) {}
   renderPresets();
   render();
   window.addEventListener('resize', () => {

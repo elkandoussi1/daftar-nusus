@@ -3,7 +3,7 @@
    دون اتصال بالإنترنت. لا علاقة له بحفظ بيانات الدفتر نفسها —
    ذلك يبقى بالكامل عبر localStorage/IndexedDB داخل الصفحة كما هو. */
 
-const CACHE_NAME = 'daftar-nusus-shell-v1';
+const CACHE_NAME = 'daftar-nusus-shell-v2';
 const APP_SHELL = [
   './',
   './index.html',
