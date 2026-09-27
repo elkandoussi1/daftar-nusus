@@ -4,6 +4,17 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0">
 <title>دفتر النصوص الرقمي — أحمد القندوسي</title>
+
+<!-- ===== PWA: تثبيت الصفحة كتطبيق عبر Chrome (تخزين دائم وموثوق) ===== -->
+<link rel="manifest" href="./manifest.json">
+<meta name="theme-color" content="#0b5c4f">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="دفتر النصوص">
+<link rel="icon" href="./icon-192.png">
+<link rel="apple-touch-icon" href="./apple-touch-icon.png">
+
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@300;400;500;700;800&family=Amiri:wght@400;700&display=swap" rel="stylesheet">
@@ -330,6 +341,7 @@ body.editing table.dtable td [contenteditable]:focus{background:var(--c-gold-sof
 .row-actions{width:44px;text-align:center;padding:4px!important}
 .days-badge{display:inline-block;background:var(--c-gold);color:#3a2c00;font-weight:800;padding:3px 12px;border-radius:20px;font-size:13px;min-width:44px;text-align:center}
 
+/* جدول الحصص — الاختيار التلقائي والألوان */
 .sched-hint{background:var(--c-gold-soft);color:var(--c-note);border:1px dashed var(--c-gold);border-radius:12px;padding:10px 14px;font-size:12.5px;font-weight:600;margin-bottom:12px}
 table.sched-table th{white-space:nowrap}
 .sched-day-cell{position:relative;min-width:96px}
@@ -578,6 +590,7 @@ body.editing .lesson-notes .sig-value:empty::before{content:"اكتب ملاحظ
   50%{box-shadow:0 8px 26px 0 rgba(255,183,3,.85)}
 }
 
+/* نافذة "شارك التطبيق" — تعتمد على نفس نمط .modal/.modal-box */
 .share-gate-box{text-align:center;position:relative;max-width:400px}
 .share-gate-close{
   position:absolute;top:10px;inset-inline-start:10px;width:30px;height:30px;
@@ -895,6 +908,7 @@ const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const uid = () => Math.random().toString(36).slice(2, 9) + Date.now().toString(36).slice(-3);
 const esc = s => (s ?? '').toString().replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 
+/* ===== جدول الحصص: جلب الأقسام المسندة + توليد ألوان ثابتة لكل قسم ===== */
 function getAssignedGroups() {
   const out = [];
   (state.sections || []).filter(s => s.type === 'classes').forEach(sec => {
@@ -921,13 +935,21 @@ function classColors(name) {
   };
 }
 
+/* ------------------------------------------------------------------
+   sanitizeHTML: تنظيف النصوص من وسوم HTML وأكوادها
+   - يفكّ الكيانات المُشفّرة (entities)
+   - يحذف كل الوسوم
+   - ينظّف المسافات
+   ------------------------------------------------------------------ */
 function sanitizeHTML(str) {
   if (str == null) return '';
   let s = String(str);
+  // فك الكيانات الشائعة
   const entities = {
     '&lt;': '<', '&gt;': '>', '&amp;': '&', '&quot;': '"', '&#39;': "'",
     '&nbsp;': ' ', '&apos;': "'", '&#x27;': "'"
   };
+  // تطبيق عدة مرات لفك التشفير المزدوج
   for (let pass = 0; pass < 3; pass++) {
     let changed = false;
     for (const [k, v] of Object.entries(entities)) {
@@ -935,28 +957,37 @@ function sanitizeHTML(str) {
     }
     if (!changed) break;
   }
+  // حذف وسوم HTML
   s = s.replace(/<[^>]*>/g, '');
+  // حذف أي بقايا مكسورة مثل style="..." color="#..."
   s = s.replace(/style\s*=\s*"[^"]*"/gi, '');
   s = s.replace(/style\s*=\s*'[^']*'/gi, '');
   s = s.replace(/color\s*=\s*"[^"]*"/gi, '');
   s = s.replace(/color\s*=\s*'[^']*'/gi, '');
   s = s.replace(/font\s*=\s*"[^"]*"/gi, '');
   s = s.replace(/font\s*=\s*'[^']*'/gi, '');
+  // حذف بقايا الرموز المعلّقة
   s = s.replace(/[<>]/g, '');
   s = s.replace(/\s+/g, ' ');
   return s.trim();
 }
 
+/* ------------------------------------------------------------------
+   repairState: يمرّ على كل بيانات الحالة وينظّف الحقول النصية
+   ------------------------------------------------------------------ */
 function repairState(st) {
   if (!st || typeof st !== 'object') return st;
+
   const clean = v => (typeof v === 'string') ? sanitizeHTML(v) : v;
 
+  // meta
   if (st.meta) {
     ['docTitle','subject','teacher','academy','direction','school','year','level'].forEach(k => {
       if (st.meta[k]) st.meta[k] = clean(st.meta[k]);
     });
   }
 
+  // sections
   (st.sections || []).forEach(sec => {
     if (typeof sec.title === 'string') sec.title = clean(sec.title);
     if (typeof sec.icon === 'string') sec.icon = clean(sec.icon);
@@ -970,7 +1001,11 @@ function repairState(st) {
     if (typeof sec.signDirector === 'string') sec.signDirector = clean(sec.signDirector);
     if (typeof sec.notes === 'string') sec.notes = clean(sec.notes);
 
-    if (Array.isArray(sec.columns)) sec.columns = sec.columns.map(c => clean(c));
+    // columns
+    if (Array.isArray(sec.columns)) {
+      sec.columns = sec.columns.map(c => clean(c));
+    }
+    // rows
     if (Array.isArray(sec.rows)) {
       sec.rows = sec.rows.map(row => {
         if (Array.isArray(row)) return row.map(c => clean(c));
@@ -981,18 +1016,21 @@ function repairState(st) {
         return row;
       });
     }
+    // fields
     if (Array.isArray(sec.fields)) {
       sec.fields.forEach(f => {
         if (f.label) f.label = clean(f.label);
         if (f.value) f.value = clean(f.value);
       });
     }
+    // groups
     if (Array.isArray(sec.groups)) {
       sec.groups.forEach(g => {
         if (g.name) g.name = clean(g.name);
         if (Array.isArray(g.items)) g.items = g.items.map(it => clean(it));
       });
     }
+    // weeks (mukathafa)
     if (Array.isArray(sec.weeks)) {
       sec.weeks.forEach(w => {
         if (w.title) w.title = clean(w.title);
@@ -1011,12 +1049,17 @@ function repairState(st) {
         });
       });
     }
+    // blocks: نتحقق فقط من النصوص العادية، ونترك HTML للفقرات الغنية
+    // لكن ننظف الكتل من وسوم <font> القديمة إن وُجدت
     const cleanBlock = b => {
       if (!b || typeof b.html !== 'string') return;
+      // إذا كان النص يحتوي على وسوم مشفّرة مثل &lt;font
       if (/&lt;|<font|<span|<div|style\s*=/i.test(b.html)) {
+        // إن كان النوع نص عادي، نظّفه كاملاً
         if (b.type === 'p' || b.type === 'note' || b.type === 'quote') {
           b.html = sanitizeHTML(b.html);
         } else {
+          // للعناوين، احتفظ بالوسوم الآمنة فقط
           b.html = b.html.replace(/<\s*(font|span|div|style)[^>]*>/gi, '').replace(/<\s*\/\s*(font|span|div|style)\s*>/gi, '');
         }
       }
@@ -1024,6 +1067,7 @@ function repairState(st) {
     if (Array.isArray(sec.blocks)) sec.blocks.forEach(cleanBlock);
   });
 
+  // levels
   (st.levels || []).forEach(lv => {
     if (typeof lv.name === 'string') lv.name = clean(lv.name);
     if (typeof lv.icon === 'string') lv.icon = clean(lv.icon);
@@ -1068,6 +1112,9 @@ function toast(msg, icon = '✓') {
   t._t = setTimeout(() => t.classList.remove('show'), 2500);
 }
 
+/* ============================================================
+   ثوابت
+   ============================================================ */
 const HIJRI_MONTHS = ['محرم','صفر','ربيع الأول','ربيع الآخر','جمادى الأولى','جمادى الآخرة','رجب','شعبان','رمضان','شوال','ذو القعدة','ذو الحجة'];
 const GREG_MONTHS = ['يناير','فبراير','مارس','أبريل','ماي','يونيو','يوليوز','غشت','شتنبر','أكتوبر','نونبر','دجنبر'];
 const WEEK_DAYS = ['سبت','أحد','اثنين','ثلاثاء','أربعاء','خميس','جمعة'];
@@ -1174,7 +1221,7 @@ const buildLessons = arr => arr.map(([n,m,t]) => makeLesson(n,m,t));
 const DEFAULT_LOGO = 'data:image/svg+xml;utf8,' + encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200"><defs><linearGradient id="g1" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#0b5c4f"/><stop offset="1" stop-color="#0e7a63"/></linearGradient><linearGradient id="g2" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#c9a227"/><stop offset="1" stop-color="#e5c150"/></linearGradient></defs><circle cx="100" cy="100" r="95" fill="url(#g1)" stroke="url(#g2)" stroke-width="4"/><circle cx="100" cy="100" r="84" fill="none" stroke="url(#g2)" stroke-width="1.5" opacity="0.6"/><circle cx="100" cy="100" r="76" fill="none" stroke="white" stroke-width="1" opacity="0.35"/><path d="M100 32 L108 52 L130 52 L112 65 L120 86 L100 73 L80 86 L88 65 L70 52 L92 52 Z" fill="url(#g2)"/><path d="M60 105 Q100 92 140 105 L140 118 Q100 105 60 118 Z" fill="white" opacity="0.92"/><path d="M60 122 Q100 109 140 122 L140 135 Q100 122 60 135 Z" fill="url(#g2)"/><text x="100" y="168" text-anchor="middle" font-size="18" fill="white" font-family="serif" font-weight="bold">المملكة المغربية</text></svg>`);
 
 const DEFAULT_STATE = {
-  version: 8,
+  version: 7,
   meta: {
     docTitle: 'دفتر النصوص', subject: 'مادة التربية الإسلامية',
     teacher: 'أحمد القندوسي',
@@ -1426,25 +1473,68 @@ function migrate(parsed) {
       }
     });
   }
-  parsed.version = 8;
+  parsed.version = 7;
+
+  // ✅ خطوة مهمة: تنظيف الحالة من وسوم HTML التالفة
   repairState(parsed);
   return parsed;
 }
 
+/* ============================================================
+   استرجاع احتياطي صامت عبر حافظة النظام (Clipboard) —
+   عند كل إغلاق للتطبيق نكتب نسخة من البيانات في حافظة الجهاز
+   عبر الجسر الأصلي H2AClip (مستقل تمامًا عن تخزين WebView).
+   إن وجدنا عند الفتح أن localStorage فارغ/تالف، نحاول قراءة
+   هذه النسخة من الحافظة تلقائيًا دون أي تدخل من المستخدم.
+   ============================================================ */
+function tryClipboardRestore() {
+  try {
+    if (!window.H2AClip || typeof window.H2AClip.readText !== 'function') return null;
+    const clip = window.H2AClip.readText();
+    if (!clip) return null;
+    const payload = JSON.parse(clip);
+    if (!payload || payload.__daftarBackup !== true || !payload.state) return null;
+    return payload.state;
+  } catch (e) { return null; }
+}
+function writeClipboardBackup() {
+  try {
+    if (!window.H2AClip || typeof window.H2AClip.writeText !== 'function') return;
+    repairState(state);
+    window.H2AClip.writeText(JSON.stringify({ __daftarBackup:true, ts:Date.now(), state }));
+  } catch (e) { /* أفضل جهد فقط */ }
+}
 function load() {
   try {
     let raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) {
+      // localStorage فارغ — قد يكون أول تشغيل، وقد يكون فقدان تخزين WebView.
+      // نحاول الاسترجاع الصامت من الحافظة قبل الاستسلام للوضع الافتراضي.
+      const clipState = tryClipboardRestore();
+      if (clipState) {
+        raw = JSON.stringify(clipState);
+        try { localStorage.setItem(STORAGE_KEY, raw); } catch (e) {}
+        setTimeout(() => toast('تم استرجاع بياناتك تلقائيًا (نسخة احتياطية صامتة)', '✅'), 1200);
+      }
+    }
     if (!raw) return structuredClone(DEFAULT_STATE);
-    let jsonData = JSON.parse(raw);
+    let jsonData;
+    try { jsonData = JSON.parse(raw); }
+    catch (parseErr) {
+      // بيانات محفوظة لكن تالفة (وليست غائبة) — ننبّه المستخدم صراحة بدل الصمت
+      setTimeout(() => toast('تعذّرت قراءة البيانات المحفوظة سابقًا! تحقق من مجلد التنزيلات لآخر نسخة احتياطية واستوردها', '⚠️'), 1500);
+      throw parseErr;
+    }
     const parsed = migrate(jsonData);
     const base = structuredClone(DEFAULT_STATE);
     const merged = { ...base, ...parsed };
     merged.meta = { ...base.meta, ...(parsed.meta||{}) };
     merged.theme = { ...base.theme, ...(parsed.theme||{}) };
     merged.share = { ...base.share, ...(parsed.share||{}) };
-    merged.ui = { ...base.ui, ...(parsed.ui||{}), view:{ type:'home' } };
-    merged.sections = (Array.isArray(parsed.sections) && parsed.sections.length > 0) ? parsed.sections : base.sections;
-    merged.levels = (Array.isArray(parsed.levels) && parsed.levels.length > 0) ? parsed.levels : base.levels;
+    merged.ui = { ...base.ui, ...(parsed.ui||{}) };
+    if (!Array.isArray(merged.sections)) merged.sections = base.sections;
+    if (!Array.isArray(merged.levels)) merged.levels = base.levels;
+    // تنظيف إضافي احتياطي
     repairState(merged);
     return merged;
   } catch (e) {
@@ -1452,27 +1542,61 @@ function load() {
     return structuredClone(DEFAULT_STATE);
   }
 }
-
 let saveTimer = null;
+let saveFailedWarned = false;
 let idbHistoryTimer = null;
 function scheduleHistorySnapshot() {
   clearTimeout(idbHistoryTimer);
-  idbHistoryTimer = setTimeout(() => { idbAddHistory(structuredClone(state)); }, 15000);
+  idbHistoryTimer = setTimeout(() => { idbAddHistory(structuredClone(state)); }, 20000);
 }
-
+/* ============================================================
+   نسخة احتياطية حقيقية كملف على الهاتف (مستقلة عن تخزين WebView)
+   تُستعمل كشبكة أمان إضافية إن تعذّر الحفظ الداخلي لأي سبب —
+   نفس آلية زر «تصدير» بالضبط، لتستفيد من نفس معالجة التنزيل
+   داخل تطبيق الـ APK.
+   ============================================================ */
+let lastAutoBackupTs = 0;
+function autoBackupToFile(force) {
+  try {
+    const now = Date.now();
+    if (!force && now - lastAutoBackupTs < 5 * 60 * 1000) return; // مرة كل 5 دقائق كحد أقصى
+    lastAutoBackupTs = now;
+    repairState(state);
+    const data = JSON.stringify(state);
+    const blob = new Blob([data], { type: 'application/json;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'دفتر-نسخة-احتياطية-تلقائية.json';
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 2000);
+  } catch (e) { /* أفضل جهد فقط */ }
+}
 function save(now = false) {
   clearTimeout(saveTimer);
   const doIt = () => {
+    let ok = false;
     try {
       const json = JSON.stringify(state);
       localStorage.setItem(STORAGE_KEY, json);
+      // تحقق فوري: نقرأ ما كتبناه للتأكد أن الحفظ نجح فعلاً وليس صامتًا
+      ok = localStorage.getItem(STORAGE_KEY) === json;
     } catch (e) {
       console.warn('save error', e);
+      ok = false;
     }
+    if (ok) {
+      saveFailedWarned = false;
+    } else if (!saveFailedWarned) {
+      saveFailedWarned = true;
+      toast('تعذّر الحفظ الداخلي! تم حفظ نسخة احتياطية كملف — افتحها من مجلد التنزيلات عند الحاجة عبر زر «استيراد»', '⚠️');
+      autoBackupToFile(true);
+    }
+    // مزامنة قاعدة البيانات المحلية (IndexedDB) — نسخة إضافية أكثر متانة من كل التعديلات
     idbSaveState(structuredClone(state));
     scheduleHistorySnapshot();
   };
-  now ? doIt() : saveTimer = setTimeout(doIt, 200);
+  now ? doIt() : saveTimer = setTimeout(doIt, 250);
 }
 
 const hijriCache = {};
@@ -1533,6 +1657,7 @@ function applyTheme() {
   ['h1','h2','h3','p','note'].forEach(k => { const i = $('#col-'+k); if (i) i.value = t[k]; });
   const fs = $('#fontSize'); if (fs) fs.value = t.fontSize || 15;
   const a4sw = $('#a4Switch'); if (a4sw) a4sw.checked = !!t.a4mode;
+  /* معلومات المشاركة/الدعم البنكي مضبوطة مسبقًا (غير قابلة للتعديل من الواجهة) — لا حاجة لمزامنة حقول إدخال */
   const bl = $('#brandLogo');
   if (bl && state.meta.logo && state.meta.logo !== DEFAULT_LOGO) bl.innerHTML = `<img src="${state.meta.logo}" alt="">`;
   else if (bl) bl.textContent = '📖';
@@ -1814,6 +1939,7 @@ function renderSchedule(sec, idx, base) {
   const todayName = dayNameMap[todayIdx];
   const todayAlt = altSpelling[todayIdx];
 
+  // إحصاء عدد الحصص لكل قسم لعرضها في وسيلة الإيضاح
   const usage = {};
   (sec.rows || []).forEach(row => {
     hourCols.forEach(ci => {
@@ -1843,7 +1969,7 @@ function renderSchedule(sec, idx, base) {
 
   const hint = groups.length
     ? ''
-    : `<div class="sched-hint">💡 لم تُضِف أي قسم بعد — أضف الأقسام في بطاقة «🏫 الأقسام المسندة» أولاً.</div>`;
+    : `<div class="sched-hint">💡 لم تُضِف أي قسم بعد — أضف الأقسام في بطاقة «🏫 الأقسام المسندة» أولاً، ثم ستظهر هنا تلقائيًا في قائمة اختيار كل حصة.</div>`;
 
   return `<div class="card">
     <div class="card-head"><h3>🕐 جدول الحصص الأسبوعي</h3>
@@ -2275,7 +2401,7 @@ document.addEventListener('click', e => {
     try {
       state.ui.view = JSON.parse(nav.dataset.nav);
       state.ui.semester = 0;
-      save(true); render();
+      save(); render();
       $('#sidebar').classList.remove('open');
       $('#overlay').classList.remove('show');
       $('#main').scrollTop = 0;
@@ -2300,12 +2426,12 @@ document.addEventListener('click', e => {
       break;
     case 'toggle-edit':
       state.ui.editing = !state.ui.editing;
-      save(true); render();
+      save(); render();
       toast(state.ui.editing ? 'وضع التحرير مفعّل — كل شيء قابل للتعديل' : 'وضع العرض — كل شيء مقفل', state.ui.editing ? '✏️' : '🔒');
       break;
     case 'toggle-a4':
       state.theme.a4mode = !state.theme.a4mode;
-      save(true); applyTheme();
+      save(); applyTheme();
       toast(state.theme.a4mode ? 'تم تفعيل نمط A4' : 'تم إيقاف نمط A4', '📄');
       break;
     case 'open-theme':
@@ -2318,15 +2444,15 @@ document.addEventListener('click', e => {
       break;
     case 'toggle-mode':
       state.theme.mode = state.theme.mode === 'dark' ? 'light' : 'dark';
-      save(true); applyTheme();
+      save(); applyTheme();
       break;
     case 'preview-share-gate':
       $('#themeDrawer').classList.remove('open');
       $('#themeOverlay').classList.remove('show');
       showShareGate();
-      break;
-    case 'print': window.print(); break;
+      break;    case 'print': window.print(); break;
     case 'export': {
+      // نُصدّر الحالة بعد تنظيفها
       repairState(state);
       const data = JSON.stringify(state, null, 2);
       const blob = new Blob([data], { type:'application/json;charset=utf-8' });
@@ -2344,6 +2470,7 @@ document.addEventListener('click', e => {
       if (!state.ui.editing) { toast('فعّل وضع التحرير أولاً', '🔒'); return; }
       $('#logoFile').click();
       break;
+
     case 'repair-data': {
       if (!confirm('سيقوم التطبيق بتنظيف كل النصوص من وسوم HTML التالفة والأكواد الظاهرة. هل تريد المتابعة؟')) return;
       repairState(state);
@@ -2352,9 +2479,10 @@ document.addEventListener('click', e => {
       setTimeout(() => location.reload(), 800);
       break;
     }
+
     case 'reset-colors':
       Object.assign(state.theme, { h1:'#0b5c4f', h2:'#b8860b', h3:'#1d4ed8', p:'#1f2937', note:'#7c2d12' });
-      save(true); applyTheme();
+      save(); applyTheme();
       toast('تم استرجاع الألوان الافتراضية', '🎨');
       break;
     case 'reset-all':
@@ -2365,6 +2493,7 @@ document.addEventListener('click', e => {
         toast('تمت إعادة التعيين', '♻️');
       }
       break;
+
     case 'diary-day-click':
       openDayModal(+btn.dataset.sec, btn.dataset.date, +btn.dataset.daynum);
       break;
@@ -2391,7 +2520,7 @@ document.addEventListener('click', e => {
       if (!text) { toast('اكتب نص الحدث', '⚠️'); return; }
       if (!sec.events) sec.events = [];
       sec.events.push({ id: uid(), date: pendingDay.dateStr, color, text, note });
-      save(true); closeDayModal(); render();
+      save(); closeDayModal(); render();
       toast('تمت إضافة الحدث', '✅');
       break;
     }
@@ -2400,30 +2529,32 @@ document.addEventListener('click', e => {
       const sec = state.sections[secIdx];
       if (!sec.events) return;
       sec.events = sec.events.filter(ev=>ev.id!==id);
-      save(true);
+      save();
       if (pendingDay) openDayModal(pendingDay.secIdx, pendingDay.dateStr, pendingDay.dayNum);
       render();
       break;
     }
-    case 'diary-prev': state.sections[+btn.dataset.sec].startYear -= 1; save(true); render(); break;
-    case 'diary-next': state.sections[+btn.dataset.sec].startYear += 1; save(true); render(); break;
+    case 'diary-prev': state.sections[+btn.dataset.sec].startYear -= 1; save(); render(); break;
+    case 'diary-next': state.sections[+btn.dataset.sec].startYear += 1; save(); render(); break;
     case 'diary-clear':
       if (!confirm('حذف جميع أحداث اليومية؟')) return;
       state.sections[+btn.dataset.sec].events = [];
-      save(true); render();
+      save(); render();
       break;
+
     case 'raawiz-add-row': {
       const si = +btn.dataset.sec;
       const sec = state.sections[si];
       if (!sec.rows) sec.rows = [];
       sec.rows.push({ id: uid(), cls:'', date:'', content:'' });
-      save(true); render();
+      save(); render();
       break;
     }
+
     case 'set-week': {
       const si = +btn.dataset.sec, i = +btn.dataset.i;
       state.sections[si].currentWeek = i;
-      save(true); renderMain();
+      save(); renderMain();
       applyEditability();
       break;
     }
@@ -2434,7 +2565,7 @@ document.addEventListener('click', e => {
       const n = sec.weeks.length + 1;
       sec.weeks.push(makeMukWeek(`الأسبوع ${n}`, 'أقرأ بطلاقة وأفهم...', 'أقرأ بإتقان وأفهم...'));
       sec.currentWeek = sec.weeks.length - 1;
-      save(true); render();
+      save(); render();
       toast('تمت إضافة أسبوع', '➕');
       break;
     }
@@ -2444,7 +2575,7 @@ document.addEventListener('click', e => {
       state.sections[si].weeks.splice(i, 1);
       if (state.sections[si].currentWeek >= state.sections[si].weeks.length)
         state.sections[si].currentWeek = 0;
-      save(true); render();
+      save(); render();
       break;
     }
     case 'muk-add-row': {
@@ -2452,9 +2583,10 @@ document.addEventListener('click', e => {
       const sess = state.sections[si].weeks[w][`session${sN+1}`];
       if (!sess.rows) sess.rows = [];
       sess.rows.push({ id: uid(), cls:'', date:'', content:'' });
-      save(true); render();
+      save(); render();
       break;
     }
+
     case 'add-section': {
       const title = prompt('اسم القسم الجديد:', 'قسم جديد');
       if (title === null) return;
@@ -2462,7 +2594,7 @@ document.addEventListener('click', e => {
       const sec = { id: uid(), title: sanitizeHTML(title||'قسم جديد'), icon: sanitizeHTML(icon), type:'rich', blocks:[blk('p','')] };
       state.sections.push(sec);
       state.ui.view = { type:'section', id: sec.id };
-      save(true); render();
+      save(); render();
       toast('تمت إضافة القسم', '➕');
       break;
     }
@@ -2474,9 +2606,10 @@ document.addEventListener('click', e => {
       if (!confirm(`حذف القسم «${sec.title}»؟`)) return;
       state.sections = state.sections.filter(s=>s.id!==id);
       if (state.ui.view.id === id) state.ui.view = { type:'home' };
-      save(true); render();
+      save(); render();
       break;
     }
+
     case 'add-level': {
       const name = prompt('اسم المستوى:', 'مستوى جديد');
       if (name === null) return;
@@ -2485,7 +2618,7 @@ document.addEventListener('click', e => {
       state.levels.push(lv);
       state.ui.view = { type:'level', id: lv.id };
       state.ui.semester = 0;
-      save(true); render();
+      save(); render();
       break;
     }
     case 'del-level': {
@@ -2496,9 +2629,10 @@ document.addEventListener('click', e => {
       if (!confirm(`حذف «${lv.name}» وكل دروسه؟`)) return;
       state.levels = state.levels.filter(l=>l.id!==id);
       if (state.ui.view.id === id) state.ui.view = { type:'home' };
-      save(true); render();
+      save(); render();
       break;
     }
+
     case 'set-semester': state.ui.semester = +btn.dataset.i; renderMain(); applyEditability(); break;
     case 'add-semester': {
       const li = +btn.dataset.lv;
@@ -2506,7 +2640,7 @@ document.addEventListener('click', e => {
       if (name === null) return;
       state.levels[li].semesters.push(makeSemester(sanitizeHTML(name||'أسدوس جديد'), []));
       state.ui.semester = state.levels[li].semesters.length - 1;
-      save(true); render();
+      save(); render();
       break;
     }
     case 'del-semester': {
@@ -2515,7 +2649,7 @@ document.addEventListener('click', e => {
       if (!confirm(`حذف «${sem.name}» وكل دروسه (${sem.lessons.length})؟`)) return;
       state.levels[li].semesters.splice(si, 1);
       state.ui.semester = 0;
-      save(true); render();
+      save(); render();
       break;
     }
     case 'add-lesson': {
@@ -2523,7 +2657,7 @@ document.addEventListener('click', e => {
       const lessons = state.levels[li].semesters[si].lessons;
       const num = lessons.length ? (Math.max(...lessons.map(l=>+l.num||0))+1) : 1;
       lessons.push(makeLesson(num, 'مدخل التزكية', 'درس جديد'));
-      save(true); render();
+      save(); render();
       break;
     }
     case 'del-lesson': {
@@ -2531,7 +2665,7 @@ document.addEventListener('click', e => {
       const ls = state.levels[li].semesters[si].lessons[i];
       if (!confirm(`حذف الدرس «${ls.title}»؟`)) return;
       state.levels[li].semesters[si].lessons.splice(i, 1);
-      save(true); render();
+      save(); render();
       break;
     }
     case 'move-lesson': {
@@ -2540,13 +2674,13 @@ document.addEventListener('click', e => {
       const j = i + d;
       if (j < 0 || j >= arr.length) return;
       [arr[i], arr[j]] = [arr[j], arr[i]];
-      save(true); render();
+      save(); render();
       break;
     }
     case 'add-part': {
       const li = +btn.dataset.lv, si = +btn.dataset.s, i = +btn.dataset.i;
       state.levels[li].semesters[si].lessons[i].parts.push({ id: uid(), title:'حصة إضافية', blocks:[blk('p','')] });
-      save(true); render();
+      save(); render();
       break;
     }
     case 'del-part': {
@@ -2555,13 +2689,13 @@ document.addEventListener('click', e => {
       if (parts.length <= 1) { toast('يجب الإبقاء على حصة واحدة على الأقل', '⚠️'); return; }
       if (!confirm('حذف هذه الحصة؟')) return;
       parts.splice(p, 1);
-      save(true); render();
+      save(); render();
       break;
     }
     case 'add-block-lesson': {
       const li = +btn.dataset.lv, si = +btn.dataset.s, i = +btn.dataset.i, p = +btn.dataset.p;
       state.levels[li].semesters[si].lessons[i].parts[p].blocks.push(blk('p',''));
-      save(true); render();
+      save(); render();
       break;
     }
     case 'add-signature': {
@@ -2569,7 +2703,7 @@ document.addEventListener('click', e => {
       const ls = state.levels[li].semesters[si].lessons[i];
       if (!ls.signatures) ls.signatures = [];
       ls.signatures.push(makeSig('توقيع جديد', ''));
-      save(true); render();
+      save(); render();
       break;
     }
     case 'del-signature': {
@@ -2578,7 +2712,7 @@ document.addEventListener('click', e => {
       if (!ls.signatures || ls.signatures.length <= 1) { toast('يجب الإبقاء على توقيع واحد', '⚠️'); return; }
       if (!confirm('حذف هذا التوقيع؟')) return;
       ls.signatures.splice(si2, 1);
-      save(true); render();
+      save(); render();
       break;
     }
     case 'add-block': {
@@ -2586,14 +2720,14 @@ document.addEventListener('click', e => {
       const type = btn.dataset.type || 'p';
       const txt = type==='h1'?'عنوان كبير':type==='h2'?'عنوان فرعي':type==='h3'?'عنوان ثانوي':type==='note'?'ملاحظة مهمة':type==='quote'?'اقتباس...':'';
       state.sections[si].blocks.push(blk(type, txt));
-      save(true); render();
+      save(); render();
       break;
     }
     case 'block-del': {
       const arr = resolveBlockArray(btn.dataset.sec);
       if (!arr) return;
       arr.splice(+btn.dataset.i, 1);
-      save(true); render();
+      save(); render();
       break;
     }
     case 'block-up':
@@ -2604,30 +2738,30 @@ document.addEventListener('click', e => {
       const j = i + (a==='block-up' ? -1 : 1);
       if (j < 0 || j >= arr.length) return;
       [arr[i], arr[j]] = [arr[j], arr[i]];
-      save(true); render();
+      save(); render();
       break;
     }
     case 'add-field': {
       state.sections[+btn.dataset.sec].fields.push({ id: uid(), label:'حقل جديد', value:'' });
-      save(true); render();
+      save(); render();
       break;
     }
     case 'del-field': {
       state.sections[+btn.dataset.sec].fields.splice(+btn.dataset.i, 1);
-      save(true); render();
+      save(); render();
       break;
     }
     case 'add-row': {
       const sec = state.sections[+btn.dataset.sec];
       sec.rows.push(new Array(sec.columns.length).fill(''));
-      save(true); render();
+      save(); render();
       break;
     }
     case 'add-col': {
       const sec = state.sections[+btn.dataset.sec];
       sec.columns.push('عمود جديد');
       sec.rows.forEach(r=>r.push(''));
-      save(true); render();
+      save(); render();
       break;
     }
     case 'del-col': {
@@ -2635,42 +2769,42 @@ document.addEventListener('click', e => {
       if (sec.columns.length <= 1) { toast('لا يمكن حذف كل الأعمدة', '⚠️'); return; }
       sec.columns.pop();
       sec.rows.forEach(r=>r.pop());
-      save(true); render();
+      save(); render();
       break;
     }
     case 'del-row': {
       state.sections[+btn.dataset.sec].rows.splice(+btn.dataset.r, 1);
-      save(true); render();
+      save(); render();
       break;
     }
     case 'add-group': {
       state.sections[+btn.dataset.sec].groups.push({ id: uid(), name:'مجموعة جديدة', items:[] });
-      save(true); render();
+      save(); render();
       break;
     }
     case 'del-group': {
       const si = +btn.dataset.sec, g = +btn.dataset.g;
       if (!confirm('حذف هذه المجموعة؟')) return;
       state.sections[si].groups.splice(g, 1);
-      save(true); render();
+      save(); render();
       break;
     }
     case 'add-chip': {
       const si = +btn.dataset.sec, g = +btn.dataset.g;
       state.sections[si].groups[g].items.push('قسم جديد');
-      save(true); render();
+      save(); render();
       break;
     }
     case 'del-chip': {
       const si = +btn.dataset.sec, g = +btn.dataset.g, i = +btn.dataset.i;
       state.sections[si].groups[g].items.splice(i, 1);
-      save(true); render();
+      save(); render();
       break;
     }
     case 'change-hijri': {
       const idx = +btn.dataset.sec.split('.')[1];
       state.sections[idx].hijriYear = (state.sections[idx].hijriYear||1448) + (+btn.dataset.d);
-      save(true); render();
+      save(); render();
       break;
     }
     case 'apply-fc': document.execCommand('foreColor', false, $('#fcColor').value); break;
@@ -2695,13 +2829,13 @@ document.addEventListener('change', e => {
   const el = e.target;
   if (el.dataset.action === 'block-type-select') {
     const arr = resolveBlockArray(el.dataset.sec);
-    if (arr && arr[+el.dataset.i]) { arr[+el.dataset.i].type = el.value; save(true); render(); }
+    if (arr && arr[+el.dataset.i]) { arr[+el.dataset.i].type = el.value; save(); render(); }
   }
   if (el.dataset.action === 'block-color') {
     const arr = resolveBlockArray(el.dataset.sec);
     if (arr && arr[+el.dataset.i]) {
       arr[+el.dataset.i].color = el.value;
-      save(true);
+      save();
       const blockEl = document.querySelector(`[data-block-id="${arr[+el.dataset.i].id}"] .block-text`);
       if (blockEl) blockEl.style.color = el.value;
     }
@@ -2709,7 +2843,7 @@ document.addEventListener('change', e => {
   if (el.id === 'fmtBlock') document.execCommand('formatBlock', false, el.value);
   if (el.id === 'a4Switch') {
     state.theme.a4mode = el.checked;
-    save(true); applyTheme();
+    save(); applyTheme();
   }
 });
 
@@ -2718,6 +2852,12 @@ document.addEventListener('mousedown', e => {
   if (b) { e.preventDefault(); document.execCommand(b.dataset.cmd, false, null); }
 });
 
+/* ============================================================
+   معالج الإدخال المُحسّن:
+   - الحقول التي تحمل data-plain="true" تُخزّن كنص عادي (textContent)
+   - الكتل الغنية .block-text و .official-content-area تُخزّن كـ HTML
+   - يُنظّف النص دائمًا من أي وسوم HTML عابرة
+   ============================================================ */
 document.addEventListener('input', e => {
   if (!state.ui.editing) return;
   const el = e.target.closest('[data-bind]');
@@ -2728,26 +2868,25 @@ document.addEventListener('input', e => {
                     && !el.classList.contains('official-content-area'));
   let val;
   if (isPlain) {
+    // نص عادي فقط — نظّف من أي وسوم قد تلتصق
     val = el.textContent || '';
+    // إزالة أي وسوم متبقية بصريًا
     if (/<[^>]+>|&lt;|&gt;/.test(val)) {
       val = sanitizeHTML(val);
+      // أعد كتابة المحتوى إن كان يحتوي وسوم
       if (el.textContent !== val) {
+        const sel = window.getSelection();
+        const offset = sel?.anchorOffset || 0;
         el.textContent = val;
       }
     }
   } else {
+    // كتلة غنية — احفظ HTML
     val = el.innerHTML;
   }
   setPath(state, bind, val);
   save();
 });
-
-document.addEventListener('focusout', e => {
-  if (state.ui.editing && e.target.closest('[contenteditable], select, input, textarea')) {
-    save(true);
-  }
-});
-
 document.addEventListener('paste', e => {
   if (!state.ui.editing) return;
   const el = e.target.closest('[contenteditable]');
@@ -2757,14 +2896,16 @@ document.addEventListener('paste', e => {
   document.execCommand('insertText', false, text);
 });
 
+/* اختيار القسم في جدول الحصص من قائمة منسدلة (الأقسام المسندة) */
 document.addEventListener('change', e => {
   const el = e.target.closest('select[data-bind]');
   if (!el || !state.ui.editing) return;
   setPath(state, el.dataset.bind, el.value);
-  save(true);
+  save();
   render();
 });
 
+/* منع الكتابة تماماً في وضع العرض */
 document.addEventListener('keydown', e => {
   if (state.ui.editing) return;
   const el = e.target.closest('[contenteditable]');
@@ -2817,7 +2958,7 @@ document.addEventListener('click', e => {
   if (!p) return;
   const preset = PRESETS[+p.dataset.preset];
   Object.assign(state.theme, preset.c);
-  save(true); applyTheme();
+  save(); applyTheme();
   toast('تم تطبيق النمط: ' + preset.name, '🎨');
 });
 
@@ -2859,10 +3000,8 @@ $('#importFile').addEventListener('change', e => {
         meta: { ...base.meta, ...(migrated.meta||{}) },
         theme: { ...base.theme, ...(migrated.theme||{}) },
         share: { ...base.share, ...(migrated.share||{}) },
-        ui: { ...base.ui, view:{ type:'home' }, editing:false }
+        ui: { ...base.ui, view:{ type:'home' } }
       };
-      state.sections = (Array.isArray(migrated.sections) && migrated.sections.length > 0) ? migrated.sections : base.sections;
-      state.levels = (Array.isArray(migrated.levels) && migrated.levels.length > 0) ? migrated.levels : base.levels;
       repairState(state);
       save(true); render();
       toast('تم استيراد البيانات بنجاح', '✅');
@@ -2879,7 +3018,7 @@ document.addEventListener('keydown', e => {
   if (e.ctrlKey && e.key.toLowerCase() === 'e') {
     e.preventDefault();
     state.ui.editing = !state.ui.editing;
-    save(true); render();
+    save(); render();
     toast(state.ui.editing ? 'وضع التحرير مفعّل' : 'وضع العرض', state.ui.editing ? '✏️' : '🔒');
   }
   if (e.key === 'Escape') {
@@ -2895,6 +3034,12 @@ document.addEventListener('keydown', e => {
   }
 });
 
+/* ============================================================
+   نافذة "شارك التطبيق" — تذكير لطيف وغير مزعج
+   تظهر إجباريًا وبدون استثناء عند كل فتح للتطبيق (وأيضًا عند
+   إغلاقه/تصغيره) — لا يوجد إعداد لتعطيلها أو للتحكم في وتيرة ظهورها.
+   قابلة للإغلاق من زر ✕ أو رابط «إغلاق ومتابعة العمل» بعد أن تظهر.
+   ============================================================ */
 function showShareGate() {
   const modal = $('#shareGateModal');
   if (!modal || modal.classList.contains('show')) return;
@@ -2909,6 +3054,7 @@ function closeShareGate() {
   document.body.style.overflow = '';
 }
 function scheduleShareGate() {
+  // تظهر دائمًا بعد لحظات قصيرة من فتح التطبيق، دون أي شرط
   setTimeout(showShareGate, 2500);
 }
 function shareGateSupport() {
@@ -2925,7 +3071,7 @@ async function shareGateShare() {
   let shared = false;
   if (navigator.share) {
     try { await navigator.share({ title: appName, text: shareText, url: shareUrl }); shared = true; }
-    catch (err) {}
+    catch (err) { /* المستخدم أغلق نافذة المشاركة */ }
   } else {
     const waUrl = 'https://wa.me/?text=' + encodeURIComponent(shareText + '\n' + shareUrl);
     window.open(waUrl, '_blank', 'noopener,noreferrer');
@@ -2933,12 +3079,14 @@ async function shareGateShare() {
   }
   if (shared) {
     state.share.shareCount = (state.share.shareCount || 0) + 1;
-    save(true);
     toast(state.share.shareCount >= 3 ? 'شكرًا لدعمك المستمر 🙏' : `شكرًا على المشاركة! (${state.share.shareCount}/3)`, '💚');
   }
   closeShareGate();
 }
 
+/* ============================================================
+   نافذة معلومات الدعم البنكي (مأخوذة بنفس الروح من أداة الملاحظات الذكية)
+   ============================================================ */
 function bankFieldRow(label, value) {
   const safeVal = esc(value);
   return `<div class="bank-field">
@@ -3010,13 +3158,17 @@ function copyBankField(val, btn) {
   }
 }
 
+/* ============================================================
+   قاعدة بيانات محلية (IndexedDB) لحفظ نسخة إضافية من كل التعديلات
+   بالإضافة إلى localStorage — لضمان عدم ضياع البيانات داخل تطبيق APK
+   ============================================================ */
 const IDB_NAME = 'DaftarNususDB';
 const IDB_VERSION = 1;
 let idbInstance = null;
 function openIDB() {
   return new Promise((resolve, reject) => {
     if (idbInstance) return resolve(idbInstance);
-    if (!window.indexedDB) return reject(new Error('IndexedDB غير مدعوم'));
+    if (!window.indexedDB) return reject(new Error('IndexedDB غير مدعوم في هذه البيئة'));
     const req = indexedDB.open(IDB_NAME, IDB_VERSION);
     req.onupgradeneeded = e => {
       const db = e.target.result;
@@ -3038,7 +3190,7 @@ async function idbSaveState(data) {
       tx.objectStore('state').put(data, 'current');
       tx.oncomplete = res; tx.onerror = () => rej(tx.error);
     });
-  } catch (e) {}
+  } catch (e) { /* أفضل جهد فقط — لا نعطل عمل الدفتر إن تعذرت قاعدة البيانات */ }
 }
 async function idbLoadState() {
   try {
@@ -3115,7 +3267,7 @@ async function openBackupsModal() {
   $('#backupsModal').classList.add('show');
   const items = await idbListHistory();
   if (!items.length) {
-    list.innerHTML = `<div style="text-align:center;color:var(--c-muted);padding:16px;font-size:13px">لا توجد نسخ احتياطية بعد.</div>`;
+    list.innerHTML = `<div style="text-align:center;color:var(--c-muted);padding:16px;font-size:13px">لا توجد نسخ احتياطية بعد — تُحفظ نسخة تلقائيًا كل فترة أثناء العمل على الدفتر.</div>`;
     return;
   }
   list.innerHTML = items.map(it => `
@@ -3137,21 +3289,10 @@ async function restoreBackup(id) {
   } catch (e) { toast('تعذر استرجاع هذه النسخة', '⚠️'); }
 }
 
-(async function init() {
+(function init() {
   state = load();
-  if (!localStorage.getItem(STORAGE_KEY)) {
-    const idbState = await idbLoadState();
-    if (idbState) {
-      try {
-        state = migrate(structuredClone(idbState));
-        render();
-      } catch (e) {}
-    }
-  }
-
   renderPresets();
   render();
-
   window.addEventListener('resize', () => {
     if (window.innerWidth > 900) {
       $('#sidebar').classList.remove('open');
@@ -3159,19 +3300,84 @@ async function restoreBackup(id) {
     }
   });
 
+  /* ===== ضمان عدم فقدان أي تعديل عند الإغلاق أو تبديل التبويب ===== */
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'hidden') {
       save(true);
+      autoBackupToFile(false); // نسخة ملف احتياطية إضافية عند كل إغلاق/تصغير (مُقيّدة بـ5 دقائق)
+      writeClipboardBackup(); // نسخة صامتة في حافظة النظام لاسترجاع فوري تلقائي عند إعادة الفتح
+      // نافذة الدعم إجبارية: تظهر أيضًا عند إغلاق التطبيق أو تصغيره
+      try { showShareGate(); } catch (e) {}
+    } else if (document.visibilityState === 'visible') {
+      // وتظهر مجددًا عند العودة إلى التطبيق (استئناف من الخلفية)
+      setTimeout(() => { try { showShareGate(); } catch (e) {} }, 800);
     }
   });
-  window.addEventListener('pagehide', () => save(true));
+  window.addEventListener('pagehide', () => { save(true); autoBackupToFile(false); writeClipboardBackup(); });
   window.addEventListener('blur', () => save(true));
-  window.addEventListener('beforeunload', () => save(true));
+  // نسخة احتياطية دورية صامتة كل 15 ثانية، إضافة لضمان الحفظ الفوري
+  setInterval(() => save(true), 5000);
 
   scheduleShareGate();
 
-  console.log('%c📖 دفتر النصوص الرقمي جاهز ومؤمّن بالحفظ التلقائي', 'color:#0b5c4f;font-weight:bold;font-size:14px');
+  // إن كانت الذاكرة المحلية (localStorage) فارغة، نحاول استرجاع آخر نسخة محفوظة
+  // في قاعدة البيانات المحلية (IndexedDB) — تحسبًا لأي مسح للذاكرة داخل تطبيق APK
+  (async () => {
+    if (!localStorage.getItem(STORAGE_KEY)) {
+      const idbState = await idbLoadState();
+      if (idbState) {
+        try {
+          state = migrate(structuredClone(idbState));
+          save(true); render();
+          toast('تم استرجاع بياناتك من قاعدة البيانات المحلية', '♻️');
+        } catch (e) {}
+      }
+    }
+  })();
+
+  console.log('%c📖 دفتر النصوص الرقمي جاهز', 'color:#0b5c4f;font-weight:bold;font-size:14px');
+  console.log('%cاضغط Ctrl+E لتبديل وضع التحرير', 'color:#b8860b;font-weight:bold');
 })();
+
+/* ============================================================
+   تسجيل الـ Service Worker وزر «تثبيت التطبيق» —
+   يتيح تثبيت الدفتر من Chrome كتطبيق حقيقي (WebAPK) بتخزين
+   دائم وموثوق، بدل الاعتماد على أدوات تحويل HTML→APK خارجية.
+   ============================================================ */
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('./sw.js').catch(() => {});
+  });
+}
+let deferredInstallPrompt = null;
+window.addEventListener('beforeinstallprompt', (e) => {
+  e.preventDefault();
+  deferredInstallPrompt = e;
+  const btn = document.getElementById('pwaInstallBtn');
+  if (btn) btn.style.display = 'flex';
+});
+window.addEventListener('DOMContentLoaded', () => {
+  const btn = document.getElementById('pwaInstallBtn');
+  if (!btn) return;
+  btn.addEventListener('click', async () => {
+    if (!deferredInstallPrompt) return;
+    btn.style.display = 'none';
+    deferredInstallPrompt.prompt();
+    await deferredInstallPrompt.userChoice;
+    deferredInstallPrompt = null;
+  });
+});
+window.addEventListener('appinstalled', () => {
+  const btn = document.getElementById('pwaInstallBtn');
+  if (btn) btn.style.display = 'none';
+});
 </script>
+
+<button id="pwaInstallBtn" style="display:none;position:fixed;left:16px;bottom:16px;z-index:9999;
+  align-items:center;gap:8px;padding:12px 18px;border:none;border-radius:999px;
+  background:#0b5c4f;color:#fbf4dd;font-family:'Tajawal',system-ui,sans-serif;
+  font-size:14px;font-weight:700;box-shadow:0 10px 30px -12px rgba(11,92,79,.5);cursor:pointer;">
+  ⬇️ تثبيت التطبيق
+</button>
 </body>
 </html>
